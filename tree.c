@@ -15,7 +15,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
-
+#include "index.h"
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
 #define MODE_FILE      0100644
@@ -156,8 +156,42 @@ static int write_tree_level(IndexEntry *entries, int count, const char *prefix, 
             i++;
         } else {
             // ── RECURSIVE CASE: it's a subdirectory ──
-            // placeholder, next step
-            i++;
+            // Get the directory name (e.g., "src" from "src/main.c")
+            char dir_name[256] = {0};
+            size_t dir_len = slash - rel_path;
+            strncpy(dir_name, rel_path, dir_len);
+
+            // Collect ALL entries that belong to this subdirectory
+            int j = i;
+            while (j < count) {
+                const char *rp = entries[j].path;
+                if (prefix && strlen(prefix) > 0)
+                    rp = entries[j].path + strlen(prefix) + 1;
+                if (strncmp(rp, dir_name, dir_len) == 0 && rp[dir_len] == '/')
+                    j++;
+                else
+                    break;
+            }
+
+            // Build the new prefix for the recursive call
+            char new_prefix[512] = {0};
+            if (prefix && strlen(prefix) > 0)
+                snprintf(new_prefix, sizeof(new_prefix), "%s/%s", prefix, dir_name);
+            else
+                strncpy(new_prefix, dir_name, sizeof(new_prefix) - 1);
+
+            // Recurse to build the subtree
+            ObjectID sub_id;
+            if (write_tree_level(entries + i, j - i, new_prefix, &sub_id) != 0)
+                return -1;
+
+            // Add the subtree as a tree entry
+            TreeEntry *e = &tree.entries[tree.count++];
+            e->mode = MODE_DIR;
+            strncpy(e->name, dir_name, sizeof(e->name) - 1);
+            e->hash = sub_id;
+
+            i = j; // skip all entries we just processed
         }
     }
 
