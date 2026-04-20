@@ -14,7 +14,7 @@
 //
 // PROVIDED functions: index_find, index_remove, index_status
 // TODO functions:     index_load, index_save, index_add
-
+#include "pes.h"
 #include "index.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <dirent.h>
 
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
 // Find an index entry by path (linear scan).
@@ -138,58 +139,32 @@ int index_status(const Index *index) {
 int index_load(Index *index) {
     index->count = 0;
 
-    FILE *f = fopen(INDEX_FILE, "r");
-    if (!f) {
-        // Not an error — index just doesn't exist yet (fresh repo)
+    FILE *fp = fopen(".pes/index", "r");
+    if (!fp) {
+        // No index yet → empty is fine
         return 0;
     }
 
-    char hex[HASH_HEX_SIZE + 1];
-    unsigned int mode;
-    long mtime;
-    long size;
-    char path[512];
-
-    while (fscanf(f, "%o %64s %ld %ld %511s",
-                  &mode, hex, &mtime, &size, path) == 5) {
-        if (index->count >= MAX_INDEX_ENTRIES) break;
-
-        IndexEntry *e = &index->entries[index->count];
-        e->mode = mode;
-        hex_to_hash(hex, &e->hash);
-        e->mtime_sec = (uint64_t)mtime;
-        e->size = (uint64_t)size;
-        strncpy(e->path, path, sizeof(e->path) - 1);
-        e->path[sizeof(e->path) - 1] = '\0';
-
-        index->count++;
-    }
-
-    fclose(f);
+    // parsing will come later
+    fclose(fp);
     return 0;
 }
-
 // Save the index to .pes/index atomically.
 //
 // HINTS - Useful functions and syscalls:
 //   - qsort                            : sorting the entries array by path
 //   - fopen (with "w"), fprintf        : writing to the temporary file
-//   - hash_to_hex                      : converting ObjectID for text output
+//   - hash_to_hex                     : converting ObjectID for text output
 //   - fflush, fileno, fsync, fclose    : flushing userspace buffers and syncing to disk
 //   - rename                           : atomically moving the temp file over the old index
-//
-// Returns 0 on success, -1 on error.
 
-static int compare_index_entries(const void *a, const void *b) {
+// Returns 0 on success, -1 on errorstatic int compare_index_entries(const void *a, const void *b) {
     return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
 }
-
 int index_save(const Index *index) {
     // Sort entries by path before writing
-    Index sorted = *index;
-    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compare_index_entries);
-
-    // Write to temp file first
+   Index sorted = *index;
+    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compar    // Write to temp file first
     char tmp_path[256];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_FILE);
 
@@ -200,12 +175,11 @@ int index_save(const Index *index) {
     for (int i = 0; i < sorted.count; i++) {
         IndexEntry *e = &sorted.entries[i];
         hash_to_hex(&e->hash, hex);
-        fprintf(f, "%o %s %llu %llu %s\n",
-                e->mode,
-                hex,
-                (unsigned long long)e->mtime_sec,
-                (unsigned long long)e->size,
-                e->path);
+     	fprintf(f, "%o %s %llu %u %s\n",
+        e->mode, hex,
+        (unsigned long long)e->mtime_sec,
+        (uint32_t)e->size,
+        e->path);
     }
 
     // Flush userspace buffer, fsync to disk, then atomic rename
