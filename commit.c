@@ -161,7 +161,16 @@ int head_update(const ObjectID *new_commit) {
     } else {
         snprintf(target_path, sizeof(target_path), "%s", HEAD_FILE); // Detached HEAD
     }
+	if (head_update(&commit_id) != 0) {
+    fprintf(stderr, "error: failed to update HEAD\n");
+    return -1;
+}
 
+if (commit_id_out) {
+    *commit_id_out = commit_id;
+}
+
+return 0;
     char tmp_path[528];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", target_path);
     
