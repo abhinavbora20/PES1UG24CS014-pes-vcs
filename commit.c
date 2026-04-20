@@ -161,16 +161,7 @@ int head_update(const ObjectID *new_commit) {
     } else {
         snprintf(target_path, sizeof(target_path), "%s", HEAD_FILE); // Detached HEAD
     }
-	if (head_update(&commit_id) != 0) {
-    fprintf(stderr, "error: failed to update HEAD\n");
-    return -1;
-}
 
-if (commit_id_out) {
-    *commit_id_out = commit_id;
-}
-
-return 0;
     char tmp_path[528];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", target_path);
     
@@ -188,58 +179,35 @@ return 0;
     return rename(tmp_path, target_path);
 }
 
-// ─── TODO: Implement these ───────────────────────────────────────────────────
-
-// Create a new commit from the current staging area.
-//
-// HINTS - Useful functions to call:
-//   - tree_from_index   : writes the directory tree and gets the root hash
-//   - head_read         : gets the parent commit hash (if any)
-//   - pes_author        : retrieves the author name string (from pes.h)
-//   - time(NULL)        : gets the current unix timestamp
-//   - commit_serialize  : converts the filled Commit struct to a text buffer
-//   - object_write      : saves the serialized text as OBJ_COMMIT
-//   - head_update       : moves the branch pointer to your new commit
-//
-// Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    ObjectID tree_id;
-    ObjectID parent_id;
-    int has_parent = (head_read(&parent_id) == 0);
-	Commit commit;
-memset(&commit, 0, sizeof(Commit));
+    // snapshot the staged index into a tree object; c.tree gets the root hash
+    Commit c;
+    memset(&c, 0, sizeof(c));
+ 
+    if (tree_from_index(&c.tree) != 0) return -1;
 
-commit.tree = tree_id;
-commit.has_parent = has_parent;
-
-if (has_parent) {
-    commit.parent = parent_id;
-}
-void *data;
-size_t len;
-
-if (commit_serialize(&commit, &data, &len) != 0) {
-    fprintf(stderr, "error: serialize failed\n");
-    return -1;
-}
-
-ObjectID commit_id;
-
-if (object_write(OBJ_COMMIT, data, len, &commit_id) != 0) {
-    fprintf(stderr, "error: write failed\n");
-    free(data);
-    return -1;
-}
-
-free(data);
-snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
-commit.timestamp = (uint64_t)time(NULL);
-
-snprintf(commit.message, sizeof(commit.message), "%s", message);
-    if (tree_from_index(NULL, &tree_id) != 0) {
-        fprintf(stderr, "error: failed to build tree\n");
-        return -1;
+     ObjectID parent;
+    if (head_read(&parent) == 0) {
+        c.has_parent = 1;
+        c.parent     = parent;
+    } else {
+        c.has_parent = 0;  // first commit — no parent line in the object
     }
-
-    return -1; // temporary
+    snprintf(c.author,  sizeof(c.author),  "%s", pes_author());
+    c.timestamp = (uint64_t)time(NULL);
+    snprintf(c.message, sizeof(c.message), "%s", message);
+    void  *raw     = NULL;
+    size_t raw_len = 0;
+    if (commit_serialize(&c, &raw, &raw_len) != 0) return -1;
+ 
+    // store as OBJ_COMMIT in the content-addressable object store
+    ObjectID commit_id;
+    int ret = object_write(OBJ_COMMIT, raw, raw_len, &commit_id);
+    free(raw);
+    if (ret != 0) return -1;
+    if (head_update(&commit_id) != 0) return -1;
+ 
+    // hand the new commit hash back to the caller if they want it
+    if (commit_id_out) *commit_id_out = commit_id;
+    return 0;
 }
