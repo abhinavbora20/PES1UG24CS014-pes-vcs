@@ -206,7 +206,23 @@ commit.has_parent = has_parent;
 if (has_parent) {
     commit.parent = parent_id;
 }
+void *data;
+size_t len;
 
+if (commit_serialize(&commit, &data, &len) != 0) {
+    fprintf(stderr, "error: serialize failed\n");
+    return -1;
+}
+
+ObjectID commit_id;
+
+if (object_write(OBJ_COMMIT, data, len, &commit_id) != 0) {
+    fprintf(stderr, "error: write failed\n");
+    free(data);
+    return -1;
+}
+
+free(data);
 snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
 commit.timestamp = (uint64_t)time(NULL);
 
