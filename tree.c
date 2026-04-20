@@ -8,14 +8,15 @@
 //
 // Example single entry (conceptual):
 //   "100644 hello.txt\0" followed by 32 raw bytes of SHA-256
-
+#include "index.h"
 #include "tree.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include "index.h"
+#include "pes.h"
+
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
 #define MODE_FILE      0100644
@@ -205,8 +206,56 @@ static int write_tree_level(IndexEntry *entries, int count, const char *prefix, 
 }
 
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+    // Read .pes/index directly (avoids depending on index.o)
+    FILE *f = fopen(".pes/index", "r");
+    
+    // If no index file, write empty tree
+    if (!f) {
+        Tree empty;
+        empty.count = 0;
+        void *data;
+        size_t data_len;
+        if (tree_serialize(&empty, &data, &data_len) != 0) return -1;
+        int ret = object_write(OBJ_TREE, data, data_len, id_out);
+        free(data);
+        return ret;
+    }
+
+    // Parse index entries manually: format is "<mode> <hash-hex> <mtime> <size> <path>"
+    IndexEntry entries[MAX_INDEX_ENTRIES];
+    int count = 0;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f) && count < MAX_INDEX_ENTRIES) {
+        line[strcspn(line, "\n")] = '\0'; // strip newline
+        if (strlen(line) == 0) continue;
+
+        IndexEntry *e = &entries[count];
+        char hex[HASH_HEX_SIZE + 1];
+        unsigned int mode;
+        long long mtime;
+        long long size;
+
+        if (sscanf(line, "%o %64s %lld %lld %s",
+                   &mode, hex, &mtime, &size, e->path) != 5) continue;
+
+        e->mode = mode;
+        e->size = (off_t)size;
+        if (hex_to_hash(hex, &e->hash) != 0) continue;
+        count++;
+    }
+    fclose(f);
+
+    if (count == 0) {
+        Tree empty;
+        empty.count = 0;
+        void *data;
+        size_t data_len;
+        if (tree_serialize(&empty, &data, &data_len) != 0) return -1;
+        int ret = object_write(OBJ_TREE, data, data_len, id_out);
+        free(data);
+        return ret;
+    }
+
+    return write_tree_level(entries, count, "", id_out);
 }
