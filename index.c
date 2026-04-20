@@ -144,11 +144,28 @@ int index_load(Index *index) {
         // No index yet → empty is fine
         return 0;
     }
+    char mode_str[16], hash_hex[65], path[256];
+	long mtime;
+	size_t size;
+
+	while (fscanf(fp, "%s %s %ld %zu %s",
+              mode_str, hash_hex, &mtime, &size, path) == 5) {
+
+    IndexEntry *e = &index->entries[index->count++];
+
+   	    e->mode = strtol(mode_str, NULL, 8);
+	    hex_to_hash(hash_hex, &e->oid);
+   	    e->mtime_sec = mtime;
+	    e->size = size;
+	    strcpy(e->path, path);
+	}
 
     // parsing will come later
     fclose(fp);
     return 0;
 }
+
+
 // Save the index to .pes/index atomically.
 //
 // HINTS - Useful functions and syscalls:
