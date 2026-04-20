@@ -176,35 +176,34 @@ int index_load(Index *index) {
 //   - rename                           : atomically moving the temp file over the old index
 
 // Returns 0 on success, -1 on errorstatic int compare_index_entries(const void *a, const void *b) {
-    return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
+int compare_entries(const void *a, const void *b) {
+    return strcmp(((IndexEntry*)a)->path, ((IndexEntry*)b)->path);
 }
+
 int index_save(const Index *index) {
-    // Sort entries by path before writing
-   Index sorted = *index;
-    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compar    // Write to temp file first
-    char tmp_path[256];
-    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_FILE);
+    qsort((void*)index->entries, index->count,
+          sizeof(IndexEntry), compare_entries);
 
-    FILE *f = fopen(tmp_path, "w");
-    if (!f) return -1;
+    FILE *fp = fopen(".pes/index.tmp", "w");
+    if (!fp) return -1;
 
-    char hex[HASH_HEX_SIZE + 1];
-    for (int i = 0; i < sorted.count; i++) {
-        IndexEntry *e = &sorted.entries[i];
-        hash_to_hex(&e->hash, hex);
-     	fprintf(f, "%o %s %llu %u %s\n",
-        e->mode, hex,
-        (unsigned long long)e->mtime_sec,
-        (uint32_t)e->size,
-        e->path);
+    for (int i = 0; i < index->count; i++) {
+        char hash_hex[65];
+        hash_to_hex(&index->entries[i].oid, hash_hex);
+
+        fprintf(fp, "%o %s %ld %zu %s\n",
+                index->entries[i].mode,
+                hash_hex,
+                index->entries[i].mtime_sec,
+                index->entries[i].size,
+                index->entries[i].path);
     }
 
-    // Flush userspace buffer, fsync to disk, then atomic rename
-    fflush(f);
-    fsync(fileno(f));
-    fclose(f);
+    fflush(fp);
+    fsync(fileno(fp));
+    fclose(fp);
 
-    if (rename(tmp_path, INDEX_FILE) != 0) return -1;
+    rename(".pes/index.tmp", ".pes/index");
     return 0;
 }
 
