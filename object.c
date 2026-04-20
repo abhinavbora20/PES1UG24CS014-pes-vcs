@@ -94,38 +94,61 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // Step 1: Pick the type string
     const char *type_str;
     if (type == OBJ_BLOB)        type_str = "blob";
     else if (type == OBJ_TREE)   type_str = "tree";
     else if (type == OBJ_COMMIT) type_str = "commit";
     else return -1;
 
-    // Step 2: Build header: "blob 16\0"
     char header[64];
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
-    // +1 to include the '\0' terminator as part of the header
 
-    // Step 3: Combine header + data into one buffer
     size_t full_len = header_len + len;
     uint8_t *full = malloc(full_len);
     if (!full) return -1;
     memcpy(full, header, header_len);
     memcpy(full + header_len, data, len);
 
-    // Step 4: Compute hash of the full object
     compute_hash(full, full_len, id_out);
 
-    // Step 5: Deduplication — if it already exists, we're done
     if (object_exists(id_out)) {
         free(full);
         return 0;
     }
 
-    free(full); // we'll rebuild below — or keep it, your choice
-    return -1;  // placeholder, continue in next step
-}
+    // Step 4: Get final path and create shard directory
+    char path[512];
+    object_path(id_out, path, sizeof(path));
 
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/%.2s", OBJECTS_DIR, path + strlen(OBJECTS_DIR) + 1);
+    mkdir(dir, 0755); // OK if already exists
+
+    // Step 5: Write to temp file in same directory
+    char tmp_path[520];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+
+    int fd = open(tmp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) { free(full); return -1; }
+
+    if (write(fd, full, full_len) != (ssize_t)full_len) {
+        close(fd); free(full); return -1;
+    }
+
+    // Step 6: fsync to flush to disk
+    fsync(fd);
+    close(fd);
+    free(full);
+
+    // Step 7: Atomic rename
+    if (rename(tmp_path, path) != 0) return -1;
+
+    // Step 8: fsync the directory to persist the rename
+    int dir_fd = open(dir, O_RDONLY);
+    if (dir_fd >= 0) { fsync(dir_fd); close(dir_fd); }
+
+    return 0;
+}
 // Read an object from the store.
 //
 // Steps:
