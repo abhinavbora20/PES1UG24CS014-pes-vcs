@@ -213,58 +213,41 @@ int index_save(const Index *index) {
 //   - fopen, fread, fclose             : reading the target file's contents
 //   - object_write                     : saving the contents as OBJ_BLOB
 //   - stat / lstat                     : getting file metadata (size, mtime, mode)
-//   - index_find                       : checking if the file is already staged
+//  - index_find                       : checking if the file is already staged
 //
 // Returns 0 on success, -1 on error.
 
 int index_add(Index *index, const char *path) {
-    // Step 1: Read the file contents
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        fprintf(stderr, "error: cannot open '%s'\n", path);
-        return -1;
-    }
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return -1;
 
-    fseek(f, 0, SEEK_END);
-    size_t file_size = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    fseek(fp, 0, SEEK_END);
+    size_t size = ftell(fp);
+    rewind(fp);
 
-    void *buf = malloc(file_size);
-    if (!buf) { fclose(f); return -1; }
+    void *data = malloc(size);
+    fread(data, 1, size, fp);
+    fclose(fp);
 
-    if (fread(buf, 1, file_size, f) != file_size) {
-        fclose(f); free(buf); return -1;
-    }
-    fclose(f);
+    ObjectID oid;
+    object_write(OBJ_BLOB, data, size, &oid);
 
-    // Step 2: Write as a blob object
-    ObjectID blob_id;
-    if (object_write(OBJ_BLOB, buf, file_size, &blob_id) != 0) {
-        free(buf); return -1;
-    }
-    free(buf);
-
-    // Step 3: Get file metadata
     struct stat st;
-    if (lstat(path, &st) != 0) return -1;
+    stat(path, &st);
 
-    uint32_t mode;
-    if (st.st_mode & S_IXUSR) mode = 0100755;
-    else                      mode = 0100644;
+    IndexEntry *e = index_find(index, path);
 
-    // Step 4: Update or insert index entry
-    IndexEntry *existing = index_find(index, path);
-    if (!existing) {
-        if (index->count >= MAX_INDEX_ENTRIES) return -1;
-        existing = &index->entries[index->count++];
+    if (!e) {
+        e = &index->entries[index->count++];
     }
 
-    strncpy(existing->path, path, sizeof(existing->path) - 1);
-    existing->hash     = blob_id;
-    existing->mode     = mode;
-    existing->mtime_sec = (uint64_t)st.st_mtime;
-    existing->size     = (uint64_t)st.st_size;
+    e->mode = st.st_mode;
+    e->oid = oid;
+    e->mtime_sec = st.st_mtime;
+    e->size = size;
+    strcpy(e->path, path);
 
-    // Step 5: Save updated index
+    free(data);
+
     return index_save(index);
-}
+} 
