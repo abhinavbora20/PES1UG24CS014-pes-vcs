@@ -129,6 +129,47 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
+
+// Forward declaration
+static int write_tree_level(IndexEntry *entries, int count, const char *prefix, ObjectID *id_out);
+
+static int write_tree_level(IndexEntry *entries, int count, const char *prefix, ObjectID *id_out) {
+    Tree tree;
+    tree.count = 0;
+
+    int i = 0;
+    while (i < count) {
+        // Get path relative to current prefix
+        const char *rel_path = entries[i].path;
+        if (prefix && strlen(prefix) > 0) {
+            rel_path = entries[i].path + strlen(prefix) + 1; // skip "prefix/"
+        }
+
+        char *slash = strchr(rel_path, '/');
+
+        if (!slash) {
+            // ── BASE CASE: direct file, add as blob entry ──
+            TreeEntry *e = &tree.entries[tree.count++];
+            e->mode = entries[i].mode;
+            strncpy(e->name, rel_path, sizeof(e->name) - 1);
+            e->hash = entries[i].hash;
+            i++;
+        } else {
+            // ── RECURSIVE CASE: it's a subdirectory ──
+            // placeholder, next step
+            i++;
+        }
+    }
+
+    // Serialize and write this tree level
+    void *data;
+    size_t data_len;
+    if (tree_serialize(&tree, &data, &data_len) != 0) return -1;
+    int ret = object_write(OBJ_TREE, data, data_len, id_out);
+    free(data);
+    return ret;
+}
+
 int tree_from_index(ObjectID *id_out) {
     // TODO: Implement recursive tree building
     // (See Lab Appendix for logical steps)
